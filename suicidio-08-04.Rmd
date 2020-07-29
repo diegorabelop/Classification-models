@@ -1,0 +1,665 @@
+---
+title: "suicidio-newImputacao"
+author: "Diego Rabelo"
+date: "20 de fevereiro de 2019"
+output: html_document
+---
+
+``` {r setup}
+
+# Importar o banco de dados##
+library(haven)
+banco_pelotas_suicidio_12_02 <- read_sav("C:/Users/TB e Internet/Downloads/banco_pelotas_suicidio_12-02.sav")
+dt <- banco_pelotas_suicidio_12_02
+
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+apply(dt,2,pMiss)
+library(VIM)
+data_NA_plot1 <- aggr(dt, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(dt), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern")) 
+#selecionando as Vd com missing < 7% DATASET2 é o banco ##variável kmini15 e l077 sao de ideação
+library(stats)
+dt2 <- (subset(dt, select = c("suicidio", "sexonovo", "jc09", "hc06m", "anedonia", "lcesdico", "Zaescmae", "aintern", "afumou", "abebalc", "Zaescpai", "hprocom", "Zhpemotion", "ainfeccao", "Zhsconduct", "Zhshyper", "Zhsemotion", "Zhspeer", "Zhsprosoc", "jprocom", "Zjpemotio", "Zjpconduc", "Zjphyper", "Zhtsono", "Zjc07", "Zjppeer", "Zjpprosoc", "Zjc02", "kmorte", "kternam", "kprosau", "kprobdin", "kmudcas", "kinsbai", "kfumante", "kapanhou", "kassalto", "ZkSRQdepre_anx", "Zkqitotbr", "ZkSQRenergia", "Zktsono", "ZkSRQsentidepre", "ZkSRQsomatic", "kusodroga", "Zlrenfam", "ZlESS_score", "Zlescoljovemano", "Zlcomp2sono", "ld006", "Zlcomp1sono", "Zlduracao", "Zlcomp3sono", "Zlcomp4sono", "Zlcomp5sono", "Zlcomp7sono", "Zlcomp6sono", "lusodroga", "Zhamiltonscore", "lc002", "lc001", "lc004", "Zlaudit", "ktdah", "kafobia", "kansger", "kmaniamini", "ldep", "ltdahsempreju", "lfobsocsempr", "ltagsempreju",  "lmania_puro"))) 
+library(VIM)
+pMiss_dataset2 <- function(x){sum(is.na(x))/length(x)*100} #Ja ta multiplicado por 100
+apply(dt2,2,pMiss_dataset2)
+
+data_NA_plot2 <- aggr(dt2, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(dt2), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern")) 
+
+
+
+# Ver as classes das variaveis
+library(purrr)
+map_chr(dt2, class)
+##Mudar os fatores da classe pq tem variavel com "haven_label" CONVERSAO DE VARIAVEL
+
+dt3 <- map_df(dt2, function(x){
+  if (length(levels(as.factor(x))) > 2) z <- as.numeric(x) else z <- as.factor(x)}
+)
+map_chr(dt3, class)
+### HOLD OUT ####
+# Separar em banco de dados em Treino e Teste 
+library(caret)
+set.seed(123)
+datasetsuicidio <- dt3 [sample (1:nrow (dt3), 3635, replace=FALSE), ]
+
+
+## banco treino e teste ##
+library(caret)
+set.seed(123)
+intrain <- createDataPartition(y = datasetsuicidio$suicidio, p= 0.7, list = FALSE)
+dtTrain <-  datasetsuicidio[intrain,]
+dtTest <- datasetsuicidio[-intrain,]
+dim(dtTrain); dim(dtTest)
+# Porcentagem do desfecho em cada banco
+prop.table(table(datasetsuicidio$suicidio))
+prop.table(table(dtTrain$suicidio))
+prop.table(table(dtTest$suicidio))
+
+##proporção de missing no treino e teste
+data_NA_training <- aggr(dtTrain, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(dtTrain), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern")) 
+
+data_NA_testing <- aggr(dtTest, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(dtTest), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern")) 
+
+
+#iMPUTA??O USANDO media e moda  no treino pra aplicar depois no teste, evitando data linkage
+
+train_matrix <- dtTrain
+test_matrix <- dtTest
+
+train_matrix <- as.data.frame(train_matrix)
+test_matrix <- as.data.frame(test_matrix)
+class(train_matrix)
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+for (i in names(train_matrix)){
+  print(class(train_matrix[,i]))
+  print(is.factor(train_matrix[,i]))
+  if (is.factor(train_matrix[,i])) {
+   
+    mode_value = getmode(train_matrix[,i])
+    print("cat")
+    #recorded_values[1,i] = mode_value
+    train_matrix[is.na(train_matrix[,i]),i] = mode_value
+    test_matrix[is.na(test_matrix[,i]),i] = mode_value
+    print(mode_value)
+  } else {
+    mean_value = mean(train_matrix[,i], na.rm=TRUE)
+    #recorded_values[1,i] = mean_value
+    train_matrix[is.na(train_matrix[,i]),i] = mean_value
+    test_matrix[is.na(test_matrix[,i]),i] = mean_value
+    print("num")
+  }
+  
+}
+
+map_int(test_matrix, function(x){length(x[is.na(x)])})
+str(train_matrix)
+
+
+# Ver colinearidade
+library(purrr)
+num_vars <- map_lgl(train_matrix, is.numeric)
+dt2 <- rbind(train_matrix)
+dt2_num <- dt2[, num_vars]
+dt2_num
+
+cormatrix <- cor(dt2_num)
+cormatrix
+
+library(corrplot)
+corrplot(cormatrix, order="hclust", method = "color")
+pairs(dt2_num)
+
+
+highlyCor <- findCorrelation(cormatrix, cutoff = .75)
+highlyCor
+#excluir as colunas correlacionadas
+#train_matrix[29] <- NULL
+#test_matrix[29] <- NULL
+
+
+# Correlations with significance levels
+library(Hmisc)
+cormatrix2 <- rcorr(as.matrix(dt2_num), type="pearson") # type can be pearson or spearman
+cormatrix2
+# Build the model
+
+model1 <- glm(suicidio~., data= train_matrix,family = "binomial")
+
+
+# Detecting multicollinearity
+# The R function vif() [car package] can be used to detect multicollinearity in a regression model:
+library(car)
+vif <- car::vif(model1)
+vif
+
+# Exibe apenas aquelas com vif > 7
+vif[vif > 7]
+
+##EXCLUIR AS VARIAVEIS COM Z SCORE 
+##### Recursive Feature Selection ####
+# Model: Random Forest | Metric: ROC
+# define the control using a random forest selection function
+install.packages("randomForest")
+
+## O pacote doParallel n?o pode ser executado tudo com o Caret
+library(randomForest)
+library(ggplot2)
+library(caret)
+set.seed(101)
+trainctrl <- trainControl(classProbs= TRUE, summaryFunction = twoClassSummary, savePredictions = TRUE)
+rfFuncs$summary <- twoClassSummary
+control <- rfeControl(functions=rfFuncs, method="cv", number = 10, returnResamp="final")
+#Usei o comando abaixo pq minha vari?vel "suicidio" ta no meio das colunas. Tive que descrever todas. Tirei as variaveis colineares
+results <- rfe(train_matrix[,c(2:71)], train_matrix$suicidio, rfeControl=control, method="rf", metric = "ROC", trControl=trainctrl)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+plot(results, type=c("g", "o"))
+# estimate variable importance
+importance <- varImp(results, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+
+#### Novo Banco de Dados 
+
+data_rfe <- train_matrix
+prop.table(table(data_rfe$suicidio))
+
+data_testing <- test_matrix
+prop.table(table(data_testing$suicidio))
+#selecionar o banco bom
+
+### treinando o algoritmo
+levels(data_rfe$suicidio)
+levels(data_rfe$suicidio) <- c("no", "yes")
+levels(data_testing$suicidio)
+levels(data_testing$suicidio) <- c("no", "yes")
+
+# DownSampling
+library(caret)
+set.seed(108)
+ctrl.rf_down <- trainControl(method = "repeatedcv", number = 10, repeats = 1000,
+                     classProbs = TRUE,  summaryFunction = twoClassSummary,savePredictions = TRUE,
+                     sampling = "down")
+start_time <- Sys.time()
+grid.rf_down = expand.grid(.mtry=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14))
+m.rf_down = train(suicidio ~ ., data = data_rfe, method = "rf", trControl = ctrl.rf_down, tuneGrid=grid.rf_down)
+m.rf_down
+summary(m.rf_down)
+#m.rf_down$pred$mtry == 1
+plot(m.rf_down)
+# estimate variable importance
+importance_rf_down <- varImp(m.rf_down, scale=FALSE)
+# summarize importance
+print(importance_rf_down)
+# plot importance
+plot(importance_rf_down)
+# SD
+m.rf_down_results <- m.rf_down$results
+View(m.rf_down_results)
+
+
+# matrix de confusao 
+library(e1071)
+test_pred_down <- predict(m.rf_down, newdata = data_testing[,-1])
+test_pred_down
+matrixConfusao_down <- confusionMatrix(test_pred_down, data_testing$suicidio, positive = "yes")
+matrixConfusao_down 
+# ROC
+library(caret)
+library(pROC)
+p<- predict (m.rf_down, data_testing)
+p_prob <- predict (m.rf_down, data_testing, type = "prob")
+confusionMatrix(p, data_testing$suicidio)
+print(confusionMatrix(p, data_testing$suicidio, positive = "yes"))
+r <- roc (data_testing$suicidio, p_prob[,"yes"])
+plot(r)
+r$auc
+
+
+##Mudando o threshold 
+
+##Mudando o threshold 
+
+library(SDMTools)
+
+#### TESTE COM NÚMEROS ALEATÓRIOS ####
+obs <- data_rfe$suicidio
+table(obs)
+levels(obs) <- c("0", "1")
+obs <- as.numeric(as.character(obs))
+obs
+
+
+obs <- data_testing$suicidio
+
+# Os levels estão em ordem?
+levels(obs)
+
+levels(obs) <- c("0", "1")
+obs <- as.numeric(as.character(obs))
+obs
+
+# predições do modelo em probabilidades
+rf.predict <- predict(m.rf_down, data_testing[, -1], type = "prob")
+predictions <- as.vector(rf.predict[, 2])
+predictions
+
+confusion_df <- data.frame(obs, predictions)
+threshold_seq <- seq(0, 1, by = 0.01)
+
+confMatrix <- function(i, obs, predictions, ...){
+  require(caret)
+  require(SDMTools)
+  
+  conf_matrix <- confusion.matrix(obs, predictions, threshold = i)
+  cm_table <- as.table(conf_matrix)
+  cm <- confusionMatrix(cm_table, positive = "1")
+  p_acc <- cm$overall[6]
+  acc <- cm$overall[1]
+  ppv <- cm$byClass[3]
+  null_acc <- cm$overall[5]
+  result <-  c("limiar" = i, 
+               cm$byClass[1], 
+               cm$byClass[2], 
+               "AB" = as.numeric(c((cm$byClass[1]+cm$byClass[2]) / 2)), 
+               acc, 
+               p_acc, 
+               null_acc,
+               ppv)
+  result
+}
+
+
+library(purrr)
+library(plyr)
+
+confMatrix(0.5, obs, predictions)
+
+result_list <- map(threshold_seq, confMatrix, obs = obs, predictions = predictions)
+result_df <- ldply(result_list)
+result_df
+
+
+
+cat("O limiar com maior Acurácia Balanceada é", result_df$limiar[which.max(result_df$AB)])
+cat("O PPV do limiar com maior acurácia balanceada é", result_df$`Pos Pred Value`[which.max(result_df$AB)])
+
+
+cat("O limiar com maior Acurácia é", result_df$limiar[which.max(result_df$Accuracy)])
+cat("O menor valor de p da Acurácia é", min(result_df$AccuracyPValue))
+cat("O limiar com menor valor de p da Acurácia é", result_df$limiar[which.min(result_df$AccuracyPValue)])
+cat("O limiar com maior PPV é", result_df$limiar[which.max(result_df$`Pos Pred Value`)])
+cat("O maior PPV é", result_df$`Pos Pred Value`[which.max(result_df$`Pos Pred Value`)])
+
+
+max(result_df$Accuracy)
+max(result_df$AB)
+
+matrixConfusao_down
+
+cat("O AB do limiar com maior acurácia balanceada é", result_df$AB[which.max(result_df$AB)])
+
+{plot(result_df$limiar, result_df$AB, type = "l", ylim = c(min(result_df$Accuracy), max(result_df$Accuracy)))
+lines(result_df$limiar, result_df$Accuracy, col = "red")}
+
+plot(result_df$Sensitivity, result_df$Accuracy)
+plot(result_df$Specificity, result_df$AccuracyPValue)
+{plot(result_df$limiar, result_df$AccuracyPValue, type = "l", ylim = c(0, 0.5))
+abline(h = 0.05, col = "red")}
+
+min(result_df$AccuracyPValue)
+
+
+#uSE result_df e veja na coluna de threshold a acurácia que foi dada acima para verificar a sensibilidade e especificidade
+limiar Sensitivity Specificity    AB   Accuracy AccuracyPValue AccuracyNull
+0.70  0.97979798 0.915237134 0.9475176 0.92110092   9.189447e-02    0.9091743
+##O PPV do limiar com maior acurácia balanceada é 
+##O PPV do limiar com maior acurácia balanceada é 0.5359116
+####################### NAO USAR CODE ABAIXO ###################
+
+
+# Loading DMwr to balance the unbalanced class
+library(DMwR)
+
+## Smote : Synthetic Minority Oversampling Technique To Handle Class Imbalancy In Binary Classification
+balanced.data <- SMOTE(suicidio ~., train_matrix, perc.over = 4800, k = 5, perc.under = 1000)
+
+as.data.frame(table(balanced.data$suicidio))
+## Predict the Values
+library(randomForest)  
+library(e1071)  
+
+set.seed(5627)
+rose_outside <- train(suicidio ~ ., data = rose_train, 
+                      method = "treebag",
+                      nbagg = 50,
+                      metric = "ROC",
+                      trControl = ctrl)
+
+
+library(DMwR)
+
+set.seed(9560)
+smote_train <- SMOTE(suicidio ~ ., data  = data_rfe)                         
+table(smote_train$suicidio) 
+
+ctrl <- trainControl(method = "repeatedcv", repeats = 10,
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary)
+grid.rf_down = expand.grid(.mtry=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14))
+set.seed(5627)
+smote_outside <- train(suicidio ~ ., data = smote_train, method = "rf", metric = "ROC", trControl = ctrl, tuneGrid=grid.rf_down)
+# matrix de confusao 
+library(e1071)
+test_pred_smote <- predict(smote_outside, newdata = data_testing[,-1])
+matrixConfusao_smote <- confusionMatrix(test_pred_smote, data_testing$suicidio, positive = "yes")
+matrixConfusao_smote 
+# ROC
+library(caret)
+library(pROC)
+p_smote <- predict (smote_outside, data_testing)
+p_prob_smote <- predict (smote_outside, data_testing, type = "prob")
+confusionMatrix(p_smote, data_testing$suicidio)
+print(confusionMatrix(p_smote, data_testing$suicidio, positive = "yes"))
+r_smote <- roc (data_testing$suicidio, p_prob[,"yes"])
+plot(r_smote)
+r_smote$auc
+
+#https://topepo.github.io/caret/subsampling-for-class-imbalances.html 
+
+library(SDMTools)
+
+#### TESTE COM NÚMEROS ALEATÓRIOS ####
+obs_smote <- balanced.data$suicidio
+table(obs_smote)
+levels(obs_smote) <- c("0", "1")
+obs_smote <- as.numeric(as.character(obs_smote))
+obs_smote
+
+
+obs_smote <- data_testing$suicidio
+
+# Os levels estão em ordem?
+levels(obs_smote)
+
+levels(obs_smote) <- c("0", "1")
+obs_smote <- as.numeric(as.character(obs_smote))
+obs
+
+## predições do modelo em probabilidades
+rf.predict_smote <- predict(smote_outside, data_testing[, -1], type = "prob")
+predictions_smote <- as.vector(rf.predict_smote[, 2])
+predictions_smote
+
+confusion_df_smote <- data.frame(obs_smote, predictions_smote)
+threshold_seq <- seq(0, 1, by = 0.01)
+
+confMatrix_smote <- function(i, obs_smote, predictions_smote, ...){
+  require(caret)
+  require(SDMTools)
+  
+  conf_matrix <- confusion.matrix(obs_smote, predictions_smote, threshold = i)
+  cm_table <- as.table(confMatrix_smote)
+  cm <- confusionMatrix(cm_table, positive = "1")
+  p_acc <- cm$overall[6]
+  acc <- cm$overall[1]
+  ppv <- cm$byClass[3]
+  null_acc <- cm$overall[5]
+  result <-  c("limiar" = i, 
+               cm$byClass[1], 
+               cm$byClass[2], 
+               "AB" = as.numeric(c((cm$byClass[1]+cm$byClass[2]) / 2)), 
+               acc, 
+               p_acc, 
+               null_acc,
+               ppv)
+  result
+}
+
+
+library(purrr)
+library(plyr)
+
+confMatrix(0.5, obs_smote, predictions_smote)
+
+result_list_smote <- map(threshold_seq, confMatrix, obs = obs, predictions = predictions)
+result_df_smote <- ldply(result_list_smote)
+result_df_smote
+
+
+
+cat("O limiar com maior Acurácia Balanceada é", result_df_smote$limiar[which.max(result_df_smote$AB)])
+cat("O PPV do limiar com maior acurácia balanceada é", result_df_smote$`Pos Pred Value`[which.max(result_df_smote$AB)])
+
+cat("O limiar com maior Acurácia é", result_df_smote$limiar[which.max(result_df_smote$Accuracy)])
+cat("O menor valor de p da Acurácia é", min(result_df_smote$AccuracyPValue))
+cat("O limiar com menor valor de p da Acurácia é", result_df_smote$limiar[which.min(result_df_smote$AccuracyPValue)])
+cat("O limiar com maior PPV é", result_df_smote$limiar[which.max(result_df_smote$`Pos Pred Value`)])
+cat("O maior PPV é", result_df_smote$`Pos Pred Value`[which.max(result_df_smote$`Pos Pred Value`)])
+ ##########TENTANDO#####
+cat("O sensitivity do limiar com maior acurácia balanceada é", result_df_smote$Sensitivity[which.max(result_df_smote$AB)])
+cat("O ESPECIFICIDADE do limiar com maior acurácia balanceada é", result_df_smote$Specificity[which.max(result_df_smote$AB)])
+cat("O PPV do limiar com maior acurácia balanceada é", result_df_smote$`Pos Pred Value`[which.max(result_df_smote$AB)])
+cat("O ACURACIA do limiar com maior acurácia balanceada é", result_df_smote$Accuracy[which.max(result_df_smote$AB)])
+cat("O AB do limiar com maior acurácia balanceada é", result_df_smote$AB[which.max(result_df_smote$AB)])
+
+
+max(result_df_smote$Accuracy)
+max(result_df_smote$AB)
+
+matrixConfusao_smote
+
+
+{plot(result_df_smote$limiar, result_df_smote$AB, type = "l", ylim = c(min(result_df_smote$Accuracy), max(result_df_smote$Accuracy)))
+  lines(result_df_smote$limiar, result_df_smote$Accuracy, col = "red")}
+
+plot(result_df_smote$Sensitivity, result_df_smote$Accuracy)
+plot(result_df_smote$Specificity, result_df_smote$AccuracyPValue)
+
+plot(result_df_smote$Specificity, result_df_smote$AccuracyPValue)
+{plot(result_df_smote$limiar, result_df_smote$AccuracyPValue, type = "l", ylim = c(0, 0.5))
+  abline(h = 0.05, col = "red")}
+
+min(result_df_smote$AccuracyPValue)
+
+
+
+################
+
+library(DMwR)
+library(ROSE)
+library(caret)
+set.seed(9560)
+ROSE_train <- ROSE(suicidio ~ ., data  = data_rfe)$data
+
+table(ROSE_train$suicidio) 
+ctrl_rose <- trainControl(method = "repeatedcv", repeats = 10,
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary)
+grid.rf_down = expand.grid(.mtry=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14))
+set.seed(5627)
+rose_outside <- train(suicidio ~ ., data = ROSE_train, method = "rf", metric = "ROC", trControl = ctrl, tuneGrid=grid.rf_down)
+# matrix de confusao 
+library(e1071)
+test_pred_rose <- predict(rose_outside, newdata = data_testing[,-1])
+matrixConfusao_rose <- confusionMatrix(test_pred_rose, data_testing$suicidio, positive = "yes")
+matrixConfusao_rose
+# ROC
+library(caret)
+library(pROC)
+p_rose <- predict (rose_outside, data_testing)
+p_prob_rose <- predict (rose_outside, data_testing, type = "prob")
+confusionMatrix(p_smote, data_testing$suicidio)
+print(confusionMatrix(p_rose, data_testing$suicidio, positive = "yes"))
+r_rose <- roc (data_testing$suicidio, p_prob_rose[,"yes"])
+plot(r_rose)
+r_rose$auc
+
+
+rf = randomForest(suicidio~.,  
+                  ntree = 100,
+                  data = balanced.data)
+plot(rf) 
+predicted.response <- predict(rf, data_testing[,-1])
+library(caret)
+
+conf <- confusionMatrix(predicted.response, data_testing$suicidio, positive = "yes")
+
+
+
+
+
+
+
+
+
+
+
+### ajeitando a Sensitivity
+
+library(SDMTools)
+
+obs <- data_rfe$suicidio
+levels(obs) <- c("0", "1")
+obs <- as.numeric(as.character(obs))
+obs
+predictions <- as.vector(test_pred_down)
+predictions
+confusion_df <- data.frame(obs, predictions)
+threshold_seq <- seq(0, 1, by = 0.1)
+confMatrix <- function(i, obs, predictions){
+  conf_matrix <- confusion.matrix(obs, predictions, threshold = i)
+  result <-  c("limiar" = i, "sens" = sensitivity(conf_matrix), "spe" = specificity(conf_matrix), "AB" = (sensitivity(conf_matrix) + specificity(conf_matrix)) / 2)
+  result
+}
+result_list <- map(threshold_seq, confMatrix, obs = obs, predictions = predictions)
+result_list
+library(plyr)
+result_df <- ldply(result_list)
+plot(result_df$limiar, result_df$AB, type = "l")
+
+result_df
+
+# obt?m as probabilidades da classe 2
+
+library(SDMTools)
+library(caret)
+rf.predict <- predict(object = m.rf_down, data_testing[, -1], type = "prob")
+
+
+predictions <- as.vector(rf.predict[, 2])
+
+# With a roc object:
+
+# Sintaxe: roc(desfecho, predictions)
+
+rocobj <- roc(data_testing$suicidio, predictions)
+
+plot(rocobj)
+varImp(m.rf_down)
+ 
+
+# Of an AUC
+
+# Intervalo de confian?a
+
+ci(rocobj)
+
+ci(rocobj, of="auc")
+
+
+
+# Of thresholds, sp (specificity), se (sensitivity) ...
+
+
+
+# calcula a mediana e os intervalos de confian?a da sensibilidade e a especificidade para v?rios limiares
+
+ci(rocobj, of="thresholds")
+
+
+
+# calcula para o limiar 0.51
+
+ci(rocobj, of="thresholds", thresholds=0.51)
+
+rocobj_sen <- roc(data_testing$suicidio, predictions, ci = TRUE, of = "sp", percent = FALSE)
+plot(rocobj_sen, main="C", percent = FALSE, ci = TRUE, print.auc = TRUE)
+
+# calcula para todos os limiares
+
+roc_liminiar <- ci(rocobj, of="thresholds", thresholds="all")
+
+roc_liminiar
+
+#ci(rocobj, of="sp", sensitivities=c(.95, .9, .85))
+
+#ci(rocobj, of="se")
+
+ 
+
+ 
+
+# plota a ROC com a AUC e seu intevalo de confian?a
+
+plot(rocobj, main="Confidence intervals", ci=TRUE, print.auc=TRUE, xlim = c(1, 0))
+
+
+
+
+
+####### usando SMOTH###
+library(caret)
+library(e1071)
+library(DMwR) ## pacote para imbalance class do tipo Smoth ##
+trctrlSmoth <- trainControl(method = "repeatedcv", number = 10, repeats = 10, returnData = TRUE, returnResamp = "final", savePredictions = "all", classProbs = TRUE, sampling = "smote", summaryFunction = twoClassSummary, selectionFunction = "best", allowParallel = TRUE)
+grid.rf_up = expand.grid(.mtry=c(1,2,3,4,5,6,7,8,9,10))
+m.rf_Smoth = train(suicidio ~ ., data = data_rfe, method = "rf", trControl = trctrlSmoth, tuneGrid=grid.rf_up, metric = "ROC")
+m.rf_Smoth
+
+## matrix de confusao 
+library(e1071)
+test_pred_Smoth <- predict(m.rf_Smoth, newdata = data_testing[,-1])
+test_pred_Smoth
+matrixConfusao_Smoth <- confusionMatrix(test_pred_Smoth, data_testing$suicidio)
+matrixConfusao_Smoth
+
+# ROC
+library(caret)
+library(pROC)
+selectedIndices_smoth <- m.rf_Smoth$pred$mtry == 1
+p_data_smoth <- m.rf_Smoth$pred[selectedIndices_down , ]
+rocdata_smoth <- roc(p_data_smoth$obs, p_data_smoth$yes, plot=TRUE)
+rocdata_smoth
+ci(rocdata_smoth)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
